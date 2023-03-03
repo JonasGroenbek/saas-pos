@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '${API_PORT}:${API_PORT}'
+    depends_on:
+      - postgres
+    networks:
+      - app
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_module
+    restart: unless-stopped
+    command: >
+      sh -c "npm run migration:up && npm run start:dev"
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    networks:
+      - app
+    restart: unless-stopped
+  postgres:
+    container_name: postgres
+    image: postgres:13
+    networks:
+      - app
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+    ports:
+      - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+networks:
+  app:
+    driver: bridge
+
+volumes:
+  pgdata:
