@@ -42,10 +42,10 @@ export class OrganizationService {
           queryRunner,
         });
 
-        await this.userService.registerUser(
-          { organizationId: organization.id, roleId: role.id, ...dto },
-          queryRunner,
-        );
+        await this.userService.registerUser({
+          userDto: { roleId: role.id, organizationId: organization.id, ...dto },
+          identity: null,
+        });
 
         const foundOrganization = await this.organizationRepository.getOne({
           where: { id: organization.id },

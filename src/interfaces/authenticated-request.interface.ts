@@ -1,5 +1,5 @@
-import { User } from '../user/user.entity';
+import { Identity } from '../auth/interfaces/identity-token-payload';
 
 export interface AuthenticatedRequest extends Request {
-  user: User;
+  identity: Identity;
 }

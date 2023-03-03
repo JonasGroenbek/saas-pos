@@ -4,4 +4,6 @@ export enum Policy {
   // Auth
   Auth = 'auth.*',
   AuthLogin = 'auth.login',
+  // User
+  UserGetMany = 'users.getMany',
 }

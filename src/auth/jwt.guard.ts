@@ -1,34 +1,21 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { IncomingMessage } from 'http';
-import { JoinType } from '../postgres/interfaces';
-import { User } from '../user/user.entity';
-import { UserRelation } from '../user/user.repository';
-import { UserService } from '../user/user.service';
+import { Identity } from './interfaces/identity-token-payload';
 
 @Injectable()
 export class JwtGuard implements CanActivate {
-  constructor(
-    private readonly jwtService: JwtService,
-    private readonly userService: UserService,
-  ) {}
+  constructor(private readonly jwtService: JwtService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = this.getRequest<IncomingMessage & { user?: User }>(context); // you could use FastifyRequest here too
+    const request = this.getRequest<IncomingMessage & { identity?: Identity }>(
+      context,
+    ); // you could use FastifyRequest here too
     try {
       const token = this.getToken(request);
-      const { organizationId, userId } = this.jwtService.verify(token);
-      const user = await this.userService.userRepository.getOne({
-        where: { organizationId, id: userId },
-        joins: [
-          { relation: UserRelation.Organization, type: JoinType.Inner },
-          { relation: UserRelation.Role, type: JoinType.Left },
-        ],
-      });
-      if (!user) {
-        return false;
-      }
-      request.user = user;
+      const payload: Identity = this.jwtService.verify(token);
+
+      request.identity = payload;
     } catch (e) {
       return false;
     }

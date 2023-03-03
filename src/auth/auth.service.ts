@@ -2,7 +2,7 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../user/user.service';
 import { AuthenticateDto } from './dto/authenticate.dto';
-import { JwtToken } from './interfaces/jwt';
+import { Identity } from './interfaces/identity-token-payload';
 import * as argon2 from 'argon2';
 import { User } from '../user/user.entity';
 @Injectable()
@@ -13,13 +13,11 @@ export class AuthService {
   ) {}
 
   private createToken(user: User): string {
-    const token: JwtToken = {
-      sub: user.email,
-      identity: {
-        userId: user.id,
-        organizationId: user.organizationId,
-        roleId: user.roleId,
-      },
+    const token: Identity = {
+      userId: user.id,
+      organizationId: user.organizationId,
+      roleId: user.roleId,
+      policies: user.role.policies,
     };
     return this.jwtService.sign(token);
   }
@@ -30,16 +28,25 @@ export class AuthService {
     }
   }
 
+  private async validatePassword(hash: string, plain: string) {
+    const match = await argon2.verify(hash, plain);
+    if (!match) {
+      throw new HttpException('Bad request', HttpStatus.BAD_REQUEST);
+    }
+  }
+
   async authenticate(
     authenticateDto: AuthenticateDto,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; user: User }> {
     const user = await this.userService.userRepository.getByAuth(
       authenticateDto.email,
-      await argon2.hash(authenticateDto.password),
     );
 
     this.validateUserExists(user);
+    await this.validatePassword(user.password, authenticateDto.password);
 
-    return { accessToken: this.createToken(user) };
+    delete user.password;
+
+    return { accessToken: this.createToken(user), user };
   }
 }

@@ -5,6 +5,7 @@ import { UserRepository } from './user.repository';
 import * as argon2 from 'argon2';
 import { User } from './user.entity';
 import { QueryRunner } from 'typeorm';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 @Injectable()
 export class UserService {
@@ -13,9 +14,13 @@ export class UserService {
     public readonly userRepository: UserRepository,
   ) {}
 
-  private async validateUserDoesNotExist(email: string) {
+  private async validateUserDoesNotExist(
+    email: string,
+    identity: Identity | null,
+  ) {
     const conflictingUser = await this.userRepository.getOne({
-      where: { email, organizationId: null },
+      where: { email },
+      identity,
     });
 
     if (conflictingUser) {
@@ -23,18 +28,28 @@ export class UserService {
     }
   }
 
-  async registerUser(
+  private validateRegisterUserDtoMatchesIdentity(
     userDto: RegisterUserDto,
-    queryRunner?: QueryRunner,
-  ): Promise<User> {
-    await this.validateUserDoesNotExist(userDto.email);
+    identity: Identity | null,
+  ) {
+    return !identity || identity.organizationId === userDto.organizationId;
+  }
+
+  async registerUser(args: {
+    userDto: RegisterUserDto;
+    identity: Identity | null;
+    queryRunner?: QueryRunner;
+  }): Promise<User> {
+    const { userDto, queryRunner, identity } = args;
+    await this.validateUserDoesNotExist(userDto.email, identity);
+    this.validateRegisterUserDtoMatchesIdentity(userDto, identity);
 
     const user = await this.userRepository.insertOne({
       entity: {
         email: userDto.email,
         roleId: userDto.roleId,
         password: await argon2.hash(userDto.password),
-        organizationId: userDto.organizationId,
+        organizationId: identity.organizationId || userDto.organizationId,
         firstName: userDto.firstName,
         lastName: userDto.lastName,
       },

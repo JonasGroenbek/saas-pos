@@ -4,7 +4,7 @@ import { AuthenticatedRequest } from '../interfaces/authenticated-request.interf
 export const AuthenticatedUser = createParamDecorator(
   (data: string, ctx: ExecutionContext) => {
     const request: AuthenticatedRequest = ctx.switchToHttp().getRequest();
-    const user = request.user;
+    const user = request.identity;
     return data ? user && user[data] : user;
   },
 );

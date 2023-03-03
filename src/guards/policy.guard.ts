@@ -25,24 +25,30 @@ export class PolicyGuard implements CanActivate {
     }
 
     const request: AuthenticatedRequest = context.switchToHttp().getRequest();
-    const { user } = request;
+    const { identity } = request;
 
-    if (!user) {
+    if (!identity) {
       throw new HttpException('Not authenticated', HttpStatus.UNAUTHORIZED);
     }
-    if (!user.role) {
-      throw new HttpException(
-        'The authenticated user does not have any role',
-        HttpStatus.CONFLICT,
-      );
+
+    if (
+      !identity.policies ||
+      !identity.organizationId ||
+      !identity.roleId ||
+      !identity.userId
+    ) {
+      throw new HttpException('Token not valid', HttpStatus.CONFLICT);
     }
 
     const [groupPolicy, endpointPolicy] = requestPolicy.split('.');
 
-    const policyMatch = user.role.policies.find((userPolicy) => {
+    const policyMatch = identity.policies.find((userPolicy) => {
       const [userGroupPolicy, userEndpointPolicy] = userPolicy.split('.');
-      (groupPolicy === userGroupPolicy || userGroupPolicy === '*') &&
-        (endpointPolicy === userEndpointPolicy || userEndpointPolicy === '*');
+
+      return (
+        (groupPolicy === userGroupPolicy || userGroupPolicy === '*') &&
+        (endpointPolicy === userEndpointPolicy || userEndpointPolicy === '*')
+      );
     });
 
     return policyMatch !== undefined;

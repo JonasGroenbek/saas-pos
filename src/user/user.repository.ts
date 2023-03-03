@@ -13,8 +13,15 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { User } from './user.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  SelectConfig,
+  CreateConfig,
+  UpdateConfig,
+  DeleteConfig,
+} from '../postgres/base-repository';
 import 'dotenv/config';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export const EXCLUDED_COLUMNS = ['password'];
 
@@ -27,43 +34,22 @@ const RELATION_CONFIG: {
   [key in UserRelation]: { path: string; alias: string };
 } = {
   role: { path: 'user.role', alias: 'role' },
-  organization: { path: 'user.organization', alias: 'organization' },
+  organization: {
+    path: 'user.organization',
+    alias: 'organization',
+  },
 } as const;
 
 export interface WhereConfig {
   id?: number;
   email?: string;
   password?: string;
-  organizationId: number | null;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<User>) => void>;
-  select?: string[];
-  where?: WhereConfig;
-  joins?: Array<Join<UserRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<User>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  organizationId: number | null;
-  values: Omit<Partial<User>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  organizationId: number | null;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<User, WhereConfig, UserRelation>;
+type Create = CreateConfig<User>;
+type Update = UpdateConfig<User>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class UserRepository
@@ -74,8 +60,11 @@ export class UserRepository
     super(User, dataSource.createEntityManager());
   }
 
-  private getSelectColumns(query?: QueryBuilder<User>) {
-    const EXCLUDED_COLUMNS = ['password'];
+  private getSelectColumns(
+    query: QueryBuilder<User>,
+    excludedColumns?: string[],
+  ) {
+    const EXCLUDED_COLUMNS = excludedColumns ?? ['password'];
 
     return this.dataSource.manager.connection
       .getMetadata(User)
@@ -90,45 +79,49 @@ export class UserRepository
 
   async getById(
     id: number,
-    organizationId: number,
+    identity: Identity | null,
     queryRunner?: QueryRunner,
   ): Promise<User> {
     return await this.createSelectQuery({
-      where: { id, organizationId },
+      where: { id },
+      identity,
       queryRunner,
     }).getOne();
   }
 
-  async getByAuth(email: string, password: string): Promise<User> {
+  async getByAuth(email: string): Promise<User> {
     return await this.createSelectQuery({
-      where: { email, password, organizationId: null },
+      where: { email },
+      identity: null,
       joins: [
         { relation: UserRelation.Organization, type: JoinType.Inner },
         { relation: UserRelation.Role, type: JoinType.Inner },
       ],
+      excludeColumns: [],
     }).getOne();
   }
 
-  async getByEmail(email: string, organizationId: number): Promise<User> {
+  async getByEmail(email: string, identity: Identity | null): Promise<User> {
     return await this.createSelectQuery({
-      where: { email, organizationId },
+      where: { email },
+      identity,
     }).getOne();
   }
 
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<User> {
+  async getOne(queryConfig: Select): Promise<User> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<User[]> {
+  async getMany(queryConfig: Select): Promise<User[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: User[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -139,31 +132,39 @@ export class UserRepository
     };
   }
 
-  private join(query: SelectQueryBuilder<User>, join: Join<UserRelation>) {
+  private join(
+    query: SelectQueryBuilder<User>,
+    join: Join<UserRelation>,
+    identity: Identity | null,
+  ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<User> {
+  async insertOne(queryConfig: Create): Promise<User> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<User>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<User> {
+  async softDeleteOne(queryConfig: Delete): Promise<User> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete user', HttpStatus.CONFLICT);
@@ -171,7 +172,7 @@ export class UserRepository
     return this.create(result.raw[0] as DeepPartial<User>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<User> {
+  async deleteOne(queryConfig: Delete): Promise<User> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete user', HttpStatus.CONFLICT);
@@ -179,7 +180,7 @@ export class UserRepository
     return this.create(result.raw[0] as DeepPartial<User>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<User> {
+  async updateOne(queryConfig: Update): Promise<User> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -188,9 +189,7 @@ export class UserRepository
     return this.create(result.raw[0] as DeepPartial<User>);
   }
 
-  private createInsertQuery(
-    queryConfig: CreateConfig,
-  ): InsertQueryBuilder<User> {
+  private createInsertQuery(queryConfig: Create): InsertQueryBuilder<User> {
     let query: InsertQueryBuilder<User>;
     const entity = queryConfig.entity;
     const queryRunner = queryConfig.queryRunner;
@@ -210,9 +209,7 @@ export class UserRepository
     return query;
   }
 
-  private createUpdateQuery(
-    queryConfig: UpdateConfig,
-  ): UpdateQueryBuilder<User> {
+  private createUpdateQuery(queryConfig: Update): UpdateQueryBuilder<User> {
     let query: UpdateQueryBuilder<User>;
     const { id, values, queryRunner } = queryConfig;
 
@@ -237,7 +234,7 @@ export class UserRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<User> {
     let query: SoftDeleteQueryBuilder<User>;
     const queryRunner = queryConfig.queryRunner;
@@ -260,9 +257,7 @@ export class UserRepository
     return query;
   }
 
-  private createDeleteQuery(
-    queryConfig: DeleteConfig,
-  ): DeleteQueryBuilder<User> {
+  private createDeleteQuery(queryConfig: Delete): DeleteQueryBuilder<User> {
     let query: DeleteQueryBuilder<User>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -285,9 +280,7 @@ export class UserRepository
     return query;
   }
 
-  private createSelectQuery(
-    queryConfig: SelectConfig,
-  ): SelectQueryBuilder<User> {
+  private createSelectQuery(queryConfig: Select): SelectQueryBuilder<User> {
     let query: SelectQueryBuilder<User>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -299,16 +292,16 @@ export class UserRepository
       query = this.createQueryBuilder('user');
     }
 
-    query.select(queryConfig.select || this.getSelectColumns(query));
+    query.select(this.getSelectColumns(query, queryConfig.excludeColumns));
 
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 
     if (queryConfig.where) {
-      const { email, id, organizationId, password } = queryConfig.where;
+      const { email, id, password } = queryConfig.where;
 
       if (email !== undefined) {
         query.andWhere(`user.email = :email`, { email });
@@ -321,12 +314,12 @@ export class UserRepository
       if (id !== undefined) {
         query.andWhere('user.id = :id', { id });
       }
+    }
 
-      if (organizationId !== undefined) {
-        query.andWhere('user.organizationId = :organizationId', {
-          organizationId,
-        });
-      }
+    if (queryConfig.identity) {
+      query.andWhere('user.organizationId = :organizationId', {
+        organizationId: queryConfig.identity.organizationId,
+      });
     }
 
     if (queryConfig.extensions) {
