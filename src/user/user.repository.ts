@@ -1,13 +1,13 @@
 import {
   DataSource,
   DeepPartial,
-  DeleteQueryBuilder,
-  InsertQueryBuilder,
   QueryBuilder,
   QueryRunner,
   Repository,
   SelectQueryBuilder,
   UpdateQueryBuilder,
+  DeleteQueryBuilder,
+  InsertQueryBuilder,
 } from 'typeorm';
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { User } from './user.entity';
@@ -19,6 +19,7 @@ import {
   CreateConfig,
   UpdateConfig,
   DeleteConfig,
+  identityFilter,
 } from '../postgres/base-repository';
 import 'dotenv/config';
 import { Identity } from 'src/auth/interfaces/identity-token-payload';
@@ -58,6 +59,43 @@ export class UserRepository
 {
   constructor(private readonly dataSource: DataSource) {
     super(User, dataSource.createEntityManager());
+  }
+
+  private join(
+    query: SelectQueryBuilder<User>,
+    join: Join<UserRelation>,
+    identity: Identity | null,
+  ) {
+    const RELATION_CONFIG: {
+      [key in UserRelation]: { path: string; alias: string };
+    } = {
+      role: { path: 'user.role', alias: 'role' },
+      organization: {
+        path: 'user.organization',
+        alias: 'organization',
+      },
+    } as const;
+
+    if (join.type === JoinType.Inner) {
+      query.innerJoinAndSelect(
+        RELATION_CONFIG[join.relation].path,
+        RELATION_CONFIG[join.relation].alias,
+      );
+    } else if (join.type === JoinType.Left) {
+      query.leftJoinAndSelect(
+        RELATION_CONFIG[join.relation].path,
+        RELATION_CONFIG[join.relation].alias,
+      );
+    }
+
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
+    );
+
+    return query;
   }
 
   private getSelectColumns(
@@ -132,33 +170,6 @@ export class UserRepository
     };
   }
 
-  private join(
-    query: SelectQueryBuilder<User>,
-    join: Join<UserRelation>,
-    identity: Identity | null,
-  ) {
-    if (join.type === JoinType.Inner) {
-      query.innerJoinAndSelect(
-        RELATION_CONFIG[join.relation].path,
-        RELATION_CONFIG[join.relation].alias,
-      );
-    } else if (join.type === JoinType.Left) {
-      query.leftJoinAndSelect(
-        RELATION_CONFIG[join.relation].path,
-        RELATION_CONFIG[join.relation].alias,
-      );
-    }
-
-    query.andWhere(
-      `${
-        RELATION_CONFIG[join.relation].alias
-      }.organizationId = :organizationId`,
-      { organizationId: identity.organizationId },
-    );
-
-    return query;
-  }
-
   async insertOne(queryConfig: Create): Promise<User> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<User>);
@@ -224,6 +235,8 @@ export class UserRepository
 
     query.set({ ...values, updatedAt: new Date() });
 
+    identityFilter(query, queryConfig.identity);
+
     if (id) {
       query.andWhere(`id = :id`, { id });
     }
@@ -242,17 +255,17 @@ export class UserRepository
     if (queryRunner) {
       query = queryRunner.manager
         .getRepository(User)
-        .createQueryBuilder('user')
+        .createQueryBuilder()
         .softDelete();
     } else {
-      query = this.createQueryBuilder('user').softDelete();
+      query = this.createQueryBuilder().softDelete();
     }
+
+    identityFilter(query, queryConfig.identity);
 
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
-
-    query.returning(this.getSelectColumns(query));
 
     return query;
   }
@@ -264,12 +277,14 @@ export class UserRepository
     if (queryRunner) {
       query = queryRunner.manager
         .getRepository(User)
-        .createQueryBuilder('user')
+        .createQueryBuilder()
         .delete();
     } else {
       this.dataSource.manager.connection.getMetadata(User);
-      query = this.createQueryBuilder('user').delete();
+      query = this.createQueryBuilder().delete();
     }
+
+    identityFilter(query, queryConfig.identity);
 
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
@@ -294,6 +309,8 @@ export class UserRepository
 
     query.select(this.getSelectColumns(query, queryConfig.excludeColumns));
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
         this.join(query, join, queryConfig.identity);
@@ -314,12 +331,6 @@ export class UserRepository
       if (id !== undefined) {
         query.andWhere('user.id = :id', { id });
       }
-    }
-
-    if (queryConfig.identity) {
-      query.andWhere('user.organizationId = :organizationId', {
-        organizationId: queryConfig.identity.organizationId,
-      });
     }
 
     if (queryConfig.extensions) {

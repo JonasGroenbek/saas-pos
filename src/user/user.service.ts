@@ -6,6 +6,8 @@ import * as argon2 from 'argon2';
 import { User } from './user.entity';
 import { QueryRunner } from 'typeorm';
 import { Identity } from 'src/auth/interfaces/identity-token-payload';
+import { RoleRelation } from 'src/role/role.repository';
+import { JoinType } from 'src/postgres/interfaces';
 
 @Injectable()
 export class UserService {
