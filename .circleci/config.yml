@@ -7,24 +7,25 @@ jobs:
     docker:
       - image: cimg/node:16.10
         environment:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: pipeline_pass
-          POSTGRES_HOST: localhost
-          POSTGRES_DB: postgres
-          POSTGRES_PORT: 5432
+          NODE_ENV: test
+          TEST_POSTGRES_USER: $TEST_POSTGRES_USER
+          TEST_POSTGRES_PASSWORD: $TEST_POSTGRES_PASSWORD
+          TEST_POSTGRES_HOST: $TEST_POSTGRES_HOST
+          TEST_POSTGRES_DB: $TEST_POSTGRSE_DB
+          TEST_POSTGRES_PORT: $TEST_POSTGRES_PORT
           API_PORT: $API_PORT
       - image: cimg/postgres:13.5
         environment:
-          POSTGRES_USER: postgres
-          POSTGRES_DB: postgres
-        POSTGRES_PASSWORD: pipeline_pass
+          POSTGRES_USER: $TEST_POSTGRES_USER
+          POSTGRES_DB: $TEST_POSTGRES_DB
+          POSTGRES_PASSWORD: $TEST_POSTGRES_PASSWORD
     steps:
       - checkout
       - node/install-packages:
           pkg-manager: npm
       - run:
           name: Run migrations
-          command: npm run migration:up
+          command: npm run migration:test:up
       - run:
           name: Run tests
           command: npm run test:ci

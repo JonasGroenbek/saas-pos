@@ -25,7 +25,7 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "docker rm -f shops-test-postgres && ./run-test-database.sh && jest --runInBand --verbose --",
     "test:local": "npm run migration:test:drop && npm run migration:test:up && jest --verbose --runInBand --detectOpenHandles",
-    "test:ci": "jest --verbose --runInBand --detectOpenHandles",
+    "test:ci": "./run-test-database.sh && jest --runInBand --verbose",
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {

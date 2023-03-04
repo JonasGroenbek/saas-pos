@@ -36,13 +36,15 @@ All the below will assume docker, docker-compose user is part of the docker user
 
 `cp ./.env.example ./.env && npm run migration:up && npm i && npm run start:dev`
 
-#### Testing
+#### Tests
 
 Unfortunately the tests are not availalbe to run on the docker-compose database. To run the test suite docker is required and running `npm run test` should be sufficient. If the project has not been set up `cp ./.env.example ./.env && npm i && npm run test` would do.
 
 #### Online documentation
 
 `http://localhost:{port}/docs`
+
+## Testing
 
 ## Code Conventions
 
@@ -160,3 +162,28 @@ async registerUser(userDto: RegisterUserDto): Promise<User> {
   //...
 }
 ```
+
+## Modules
+
+[Organization](/src/organization/organization.documentation.md)
+@import "/src/organization/organization.documentation.md"
+[Shop](/src/shop/shop.documentation.md)
+@import "/src/shop/shop.documentation.md"
+[User](/src/user/user.documentation.md)
+@import "/src/user/user.documentation.md"
+[Product](/src/product/product.documentation.md)
+@import "/src/product/product.documentation.md"
+[Orderline](/src/orderline/orderline.documentation.md)
+@import "/src/orderline/orderline.documentation.md"
+[Auth](/src/auth/auth.documentation.md)
+@import "/src/auth/auth.documentation.md"
+[Product Group](/src/product-group/product-group.documentation.md)
+@import "/src/product-group/product-group.documentation.md"
+[Stock Level](/src/stock-level/stock-level.documentation.md)
+@import "/src/stock-level/stock-level.documentation.md"
+[Role](/src/role/role.documentation.md)
+@import "/src/role/role.documentation.md"
+[Sale](/src/sale/sale.documentation.md)
+@import "/src/sale/sale.documentation.md"
+[Transaction](/src/transaction/transaction.documentation.md)
+@import "/src/transaction/transaction.documentation.md"
