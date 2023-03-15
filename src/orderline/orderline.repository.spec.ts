@@ -7,7 +7,9 @@ import {
   clearTestData,
   restartSequences,
   seedTestData,
+  testTransaction,
 } from '../postgres/seeds/test-data.seed';
+import { QueryRunner } from 'typeorm';
 
 describe('orderline.repository.ts', () => {
   let orderlineRepository: OrderlineRepository;
@@ -48,26 +50,24 @@ describe('orderline.repository.ts', () => {
   });
 
   describe('getOne()', () => {
-    it('should throw error when attempting to retrieve not', async () => {
-      const queryRunner =
-        await orderlineRepository.manager.connection.createQueryRunner();
-
-      try {
-        await queryRunner.startTransaction();
-
-        const largestId = testOrderlines.reduce((acc, cur) => {
+    it('should throw error when attempting to retrieve a user that does not exist', async () => {
+      const nonExistingUserId =
+        testOrderlines.reduce((acc, cur) => {
           return acc < cur.id ? cur.id : acc;
-        }, 0);
+        }, 0) + 1;
 
-        const orderline = await orderlineRepository.getOne({
-          where: { id: largestId + 1 },
-          queryRunner,
-        });
-        await expect(orderline).toBeNull();
-      } finally {
-        await queryRunner.rollbackTransaction();
-        await queryRunner.release();
-      }
+      testTransaction(
+        orderlineRepository.manager.connection,
+        async (queryRunner: QueryRunner) => {
+          const orderline = await orderlineRepository.getOne({
+            where: { id: nonExistingUserId },
+            identity: null,
+            queryRunner,
+          });
+
+          expect(orderline).toBeNull();
+        },
+      );
     });
 
     it('should retrieve an entity', async () => {

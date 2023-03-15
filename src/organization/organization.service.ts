@@ -45,6 +45,7 @@ export class OrganizationService {
         await this.userService.registerUser({
           userDto: { roleId: role.id, organizationId: organization.id, ...dto },
           identity: null,
+          queryRunner,
         });
 
         const foundOrganization = await this.organizationRepository.getOne({
@@ -53,6 +54,7 @@ export class OrganizationService {
             { relation: OrganizationRelation.User, type: JoinType.Left },
             { relation: OrganizationRelation.Role, type: JoinType.Left },
           ],
+          identity: null,
           queryRunner,
         });
 

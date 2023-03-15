@@ -3,7 +3,6 @@ import {
   DeepPartial,
   DeleteQueryBuilder,
   InsertQueryBuilder,
-  QueryRunner,
   Repository,
   SelectQueryBuilder,
   UpdateQueryBuilder,
@@ -13,7 +12,15 @@ import { ProductGroup } from './product-group.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import 'dotenv/config';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export enum ProductGroupRelation {
   Product = 'product',
@@ -30,61 +37,34 @@ export interface WhereConfig {
   organizationId?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<ProductGroup>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<ProductGroupRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<ProductGroup>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<ProductGroup>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<ProductGroup, WhereConfig, ProductGroupRelation>;
+type Create = CreateConfig<ProductGroup>;
+type Update = UpdateConfig<ProductGroup>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class ProductGroupRepository
   extends Repository<ProductGroup>
-  implements BaseRepository<ProductGroup>
+  implements BaseRepository<ProductGroup, WhereConfig, ProductGroupRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(ProductGroup, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<ProductGroup> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<ProductGroup> {
+  async getOne(queryConfig: Select): Promise<ProductGroup> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<ProductGroup[]> {
+  async getMany(queryConfig: Select): Promise<ProductGroup[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: ProductGroup[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -95,34 +75,39 @@ export class ProductGroupRepository
     };
   }
 
-  private join(
+  join(
     query: SelectQueryBuilder<ProductGroup>,
     join: Join<ProductGroupRelation>,
+    identity: Identity | null,
   ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<ProductGroup> {
+  async insertOne(queryConfig: Create): Promise<ProductGroup> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<ProductGroup>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<ProductGroup> {
+  async softDeleteOne(queryConfig: Delete): Promise<ProductGroup> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -133,7 +118,7 @@ export class ProductGroupRepository
     return this.create(result.raw[0] as DeepPartial<ProductGroup>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<ProductGroup> {
+  async deleteOne(queryConfig: Delete): Promise<ProductGroup> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -144,7 +129,7 @@ export class ProductGroupRepository
     return this.create(result.raw[0] as DeepPartial<ProductGroup>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<ProductGroup> {
+  async updateOne(queryConfig: Update): Promise<ProductGroup> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -157,7 +142,7 @@ export class ProductGroupRepository
   }
 
   private createInsertQuery(
-    queryConfig: CreateConfig,
+    queryConfig: Create,
   ): InsertQueryBuilder<ProductGroup> {
     let query: InsertQueryBuilder<ProductGroup>;
     const entity = queryConfig.entity;
@@ -179,7 +164,7 @@ export class ProductGroupRepository
   }
 
   private createUpdateQuery(
-    queryConfig: UpdateConfig,
+    queryConfig: Update,
   ): UpdateQueryBuilder<ProductGroup> {
     let query: UpdateQueryBuilder<ProductGroup>;
     const { id, values, queryRunner } = queryConfig;
@@ -193,6 +178,8 @@ export class ProductGroupRepository
       query = this.createQueryBuilder('productGroup').update();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     query.set({ ...values, updatedAt: new Date() });
 
     query.returning('*');
@@ -205,7 +192,7 @@ export class ProductGroupRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<ProductGroup> {
     let query: SoftDeleteQueryBuilder<ProductGroup>;
     const queryRunner = queryConfig.queryRunner;
@@ -219,6 +206,8 @@ export class ProductGroupRepository
       query = this.createQueryBuilder('productGroup').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -229,7 +218,7 @@ export class ProductGroupRepository
   }
 
   private createDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): DeleteQueryBuilder<ProductGroup> {
     let query: DeleteQueryBuilder<ProductGroup>;
     const queryRunner = queryConfig.queryRunner;
@@ -243,6 +232,8 @@ export class ProductGroupRepository
       query = this.createQueryBuilder('productGroup').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -253,7 +244,7 @@ export class ProductGroupRepository
   }
 
   private createSelectQuery(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): SelectQueryBuilder<ProductGroup> {
     let query: SelectQueryBuilder<ProductGroup>;
     const queryRunner = queryConfig.queryRunner;
@@ -267,9 +258,11 @@ export class ProductGroupRepository
       query = this.createQueryBuilder('productGroup').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 

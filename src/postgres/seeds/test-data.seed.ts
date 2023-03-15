@@ -1,6 +1,6 @@
 import { Organization } from '../../organization/organization.entity';
 import { Shop } from '../../shop/shop.entity';
-import { QueryRunner } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { Role } from '../../role/role.entity';
 import { User } from '../../user/user.entity';
 import { Product } from '../../product/product.entity';
@@ -10,12 +10,31 @@ import { Orderline, OrderlineType } from '../../orderline/orderline.entity';
 import { Transaction } from '../../transaction/transaction.entity';
 import { Sale } from '../../sale/sale.entity';
 import 'dotenv/config';
+import { Policy } from '../../enums/policy.enum';
+import { Identity } from '../../auth/interfaces/identity-token-payload';
 
 type RecursivePartial<T> = {
-  [P in keyof T]?: RecursivePartial<T[P]>;
+  readonly [P in keyof T]?: RecursivePartial<T[P]>;
 };
 
-const seed: RecursivePartial<Organization>[] = [
+export const testTransaction = async (
+  datasource: DataSource,
+  callback: (queryRunner: QueryRunner) => any,
+) => {
+  const queryRunner = datasource.createQueryRunner();
+  try {
+    await queryRunner.startTransaction();
+    const result = await callback(queryRunner);
+    return result;
+  } catch (e) {
+    throw e;
+  } finally {
+    await queryRunner.rollbackTransaction();
+    await queryRunner.release();
+  }
+};
+
+export const seed: RecursivePartial<Organization>[] = [
   {
     id: 1,
     name: 'org_1',
@@ -49,15 +68,6 @@ const seed: RecursivePartial<Organization>[] = [
         lastName: 'user_2',
         email: 'someone2@email.com',
         password: 'password2',
-        organizationId: 1,
-        roleId: 2,
-      },
-      {
-        id: 3,
-        firstName: 'user_3',
-        lastName: 'user_3',
-        email: 'someone3@email.com',
-        password: 'password3',
         organizationId: 1,
         roleId: 2,
       },
@@ -142,29 +152,20 @@ const seed: RecursivePartial<Organization>[] = [
     ],
     users: [
       {
+        id: 3,
+        firstName: 'user_3',
+        lastName: 'user_3',
+        email: 'someone3@email.com',
+        password: 'password3',
+        organizationId: 2,
+        roleId: 3,
+      },
+      {
         id: 4,
         firstName: 'user_4',
         lastName: 'user_4',
         email: 'someone4@email.com',
         password: 'password4',
-        organizationId: 2,
-        roleId: 3,
-      },
-      {
-        id: 5,
-        firstName: 'user_5',
-        lastName: 'user_5',
-        email: 'someone5@email.com',
-        password: 'password5',
-        organizationId: 2,
-        roleId: 4,
-      },
-      {
-        id: 6,
-        firstName: 'user_6',
-        lastName: 'user_6',
-        email: 'someone6@email.com',
-        password: 'password6',
         organizationId: 2,
         roleId: 4,
       },
@@ -280,163 +281,36 @@ const seed: RecursivePartial<Organization>[] = [
       },
     ],
   },
-  {
-    id: 3,
-    name: 'org_3',
-    roles: [
-      { id: 5, organizationId: 3, name: 'admin' },
-      { id: 6, organizationId: 3, name: 'employee' },
-    ],
-    users: [
-      {
-        id: 7,
-        firstName: 'user_7',
-        lastName: 'user_7',
-        email: 'someone7@email.com',
-        password: 'password7',
-        organizationId: 3,
-        roleId: 5,
-      },
-      {
-        id: 8,
-        firstName: 'user_8',
-        lastName: 'user_8',
-        email: 'someone8@email.com',
-        password: 'password8',
-        organizationId: 3,
-        roleId: 6,
-      },
-      {
-        id: 9,
-        firstName: 'user_9',
-        lastName: 'user_9',
-        email: 'someone9@email.com',
-        password: 'password9',
-        organizationId: 3,
-        roleId: 6,
-      },
-      {
-        id: 10,
-        firstName: 'user_10',
-        lastName: 'user_10',
-        email: 'someone10@email.com',
-        password: 'password10',
-        organizationId: 3,
-        roleId: 6,
-      },
-    ],
-    stockLevels: [
-      { id: 9, shopId: 5, organizationId: 3, productId: 7 },
-      { id: 10, shopId: 5, organizationId: 3, productId: 8 },
-      { id: 11, shopId: 6, organizationId: 3, productId: 9 },
-      { id: 12, shopId: 6, organizationId: 3, productId: 10 },
-    ],
-    shops: [
-      { id: 5, organizationId: 3, name: 'shop_5' },
-      { id: 6, organizationId: 3, name: 'shop_6' },
-    ],
-    productGroups: [
-      { id: 5, name: 'product_group_5', organizationId: 1 },
-      { id: 6, name: 'product_group_6', organizationId: 1 },
-    ],
-    products: [
-      {
-        id: 7,
-        productGroupId: 5,
-        name: 'product_7',
-        price: 100,
-        organizationId: 3,
-      },
-      {
-        id: 8,
-        productGroupId: 5,
-        name: 'product_8',
-        price: 100,
-        organizationId: 3,
-      },
-      {
-        id: 9,
-        productGroupId: 6,
-        name: 'product_9',
-        price: 100,
-        organizationId: 3,
-      },
-      {
-        id: 10,
-        productGroupId: 6,
-        name: 'product_10',
-        price: 100,
-        organizationId: 3,
-      },
-    ],
-    sales: [
-      {
-        id: 5,
-        discountAmount: 0,
-        discountPercentage: 0,
-        totalAmount: 400,
-        organizationId: 3,
-      },
-      {
-        id: 6,
-        discountAmount: 0,
-        discountPercentage: 0,
-        totalAmount: 200,
-        organizationId: 3,
-      },
-    ],
-    orderlines: [
-      {
-        id: 11,
-        saleId: 5,
-        amount: 1,
-        productId: 7,
-        orderlineType: OrderlineType.Sale,
-        organizationId: 3,
-      },
-      {
-        id: 12,
-        saleId: 5,
-        amount: 1,
-        productId: 8,
-        orderlineType: OrderlineType.Sale,
-        organizationId: 3,
-      },
-      {
-        id: 13,
-        saleId: 5,
-        amount: 1,
-        productId: 9,
-        orderlineType: OrderlineType.Sale,
-        organizationId: 3,
-      },
-      {
-        id: 14,
-        saleId: 5,
-        amount: 1,
-        productId: 10,
-        orderlineType: OrderlineType.Sale,
-        organizationId: 3,
-      },
-      {
-        id: 15,
-        saleId: 6,
-        amount: 1,
-        productId: 7,
-        orderlineType: OrderlineType.Sale,
-        organizationId: 3,
-      },
-      {
-        id: 16,
-        saleId: 6,
-        amount: 1,
-        productId: 8,
-        orderlineType: OrderlineType.Sale,
-        organizationId: 3,
-      },
-    ],
-  },
 ];
+
+export const TEST_IDENTITIES: {
+  [key in 'org1user1' | 'org1user2' | 'org2user3' | 'org2user4']: Identity;
+} = {
+  org1user1: {
+    userId: seed[0].users[0].id,
+    organizationId: seed[0].id,
+    roleId: seed[0].users[0].roleId,
+    policies: seed[0].roles[0].policies as Policy[],
+  },
+  org1user2: {
+    userId: seed[0].users[1].id,
+    organizationId: seed[0].id,
+    roleId: seed[0].users[1].roleId,
+    policies: seed[0].roles[1].policies as Policy[],
+  },
+  org2user3: {
+    userId: seed[1].users[0].id,
+    organizationId: seed[1].id,
+    roleId: seed[1].users[0].roleId,
+    policies: seed[1].roles[0].policies as Policy[],
+  },
+  org2user4: {
+    userId: seed[1].users[1].id,
+    organizationId: seed[1].id,
+    roleId: seed[1].users[1].roleId,
+    policies: seed[1].roles[1].policies as Policy[],
+  },
+};
 
 export async function seedTestData(queryRunner: QueryRunner) {
   await clearTestData(queryRunner);

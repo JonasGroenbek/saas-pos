@@ -12,6 +12,7 @@ import { OrganizationRepository } from './organization.repository';
 import { RegisterOrganizationDto } from './dto/register-organization.dto';
 import { UserModule } from '../user/user.module';
 import { RoleModule } from '../role/role.module';
+import { AuthModule } from '../auth/auth.module';
 
 describe('organization.service.ts', () => {
   let organizationService: OrganizationService;
@@ -21,6 +22,7 @@ describe('organization.service.ts', () => {
   beforeAll(async () => {
     app = await Test.createTestingModule({
       imports: [
+        AuthModule,
         TypeOrmModule.forRoot(testTypeormConfig),
         TypeOrmModule.forFeature([Organization]),
         UserModule,

@@ -12,8 +12,11 @@ import { SaleModule } from '../sale/sale.module';
 import { StockLevelModule } from '../stock-level/stock-level.module';
 import { UserModule } from '../user/user.module';
 import { AuthModule } from '../auth/auth.module';
+import { CommonModule } from '../common/common.module';
+
 @Module({
   imports: [
+    CommonModule,
     AuthModule,
     OrderlineModule,
     OrganizationModule,

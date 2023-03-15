@@ -9,8 +9,4 @@ export class RoleService {
     @InjectRepository(RoleRepository)
     public readonly roleRepository: RoleRepository,
   ) {}
-
-  getById(id: number, queryRunner?: QueryRunner) {
-    return this.roleRepository.getById(id, queryRunner);
-  }
 }

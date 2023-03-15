@@ -3,7 +3,6 @@ import {
   DeepPartial,
   DeleteQueryBuilder,
   InsertQueryBuilder,
-  QueryRunner,
   Repository,
   SelectQueryBuilder,
   UpdateQueryBuilder,
@@ -12,8 +11,16 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Shop } from './shop.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
 import 'dotenv/config';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export enum ShopRelation {
   Organization = 'organization',
@@ -30,61 +37,34 @@ export interface WhereConfig {
   organizationId?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<Shop>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<ShopRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<Shop>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<Shop>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<Shop, WhereConfig, ShopRelation>;
+type Create = CreateConfig<Shop>;
+type Update = UpdateConfig<Shop>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class ShopRepository
   extends Repository<Shop>
-  implements BaseRepository<Shop>
+  implements BaseRepository<Shop, WhereConfig, ShopRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(Shop, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<Shop> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<Shop> {
+  async getOne(queryConfig: Select): Promise<Shop> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<Shop[]> {
+  async getMany(queryConfig: Select): Promise<Shop[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: Shop[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -95,31 +75,39 @@ export class ShopRepository
     };
   }
 
-  private join(query: SelectQueryBuilder<Shop>, join: Join<ShopRelation>) {
+  join(
+    query: SelectQueryBuilder<Shop>,
+    join: Join<ShopRelation>,
+    identity: Identity | null,
+  ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<Shop> {
+  async insertOne(queryConfig: Create): Promise<Shop> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<Shop>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<Shop> {
+  async softDeleteOne(queryConfig: Delete): Promise<Shop> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete shop', HttpStatus.CONFLICT);
@@ -127,7 +115,7 @@ export class ShopRepository
     return this.create(result.raw[0] as DeepPartial<Shop>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<Shop> {
+  async deleteOne(queryConfig: Delete): Promise<Shop> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete shop', HttpStatus.CONFLICT);
@@ -135,7 +123,7 @@ export class ShopRepository
     return this.create(result.raw[0] as DeepPartial<Shop>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<Shop> {
+  async updateOne(queryConfig: Update): Promise<Shop> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -144,9 +132,7 @@ export class ShopRepository
     return this.create(result.raw[0] as DeepPartial<Shop>);
   }
 
-  private createInsertQuery(
-    queryConfig: CreateConfig,
-  ): InsertQueryBuilder<Shop> {
+  private createInsertQuery(queryConfig: Create): InsertQueryBuilder<Shop> {
     let query: InsertQueryBuilder<Shop>;
     const entity = queryConfig.entity;
     const queryRunner = queryConfig.queryRunner;
@@ -166,9 +152,7 @@ export class ShopRepository
     return query;
   }
 
-  private createUpdateQuery(
-    queryConfig: UpdateConfig,
-  ): UpdateQueryBuilder<Shop> {
+  private createUpdateQuery(queryConfig: Update): UpdateQueryBuilder<Shop> {
     let query: UpdateQueryBuilder<Shop>;
     const { id, values, queryRunner } = queryConfig;
 
@@ -180,6 +164,8 @@ export class ShopRepository
     } else {
       query = this.createQueryBuilder('shop').update();
     }
+
+    identityFilter(query, queryConfig.identity);
 
     query.set({ ...values, updatedAt: new Date() });
 
@@ -193,7 +179,7 @@ export class ShopRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<Shop> {
     let query: SoftDeleteQueryBuilder<Shop>;
     const queryRunner = queryConfig.queryRunner;
@@ -207,6 +193,8 @@ export class ShopRepository
       query = this.createQueryBuilder('shop').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -216,9 +204,7 @@ export class ShopRepository
     return query;
   }
 
-  private createDeleteQuery(
-    queryConfig: DeleteConfig,
-  ): DeleteQueryBuilder<Shop> {
+  private createDeleteQuery(queryConfig: Delete): DeleteQueryBuilder<Shop> {
     let query: DeleteQueryBuilder<Shop>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -231,6 +217,8 @@ export class ShopRepository
       query = this.createQueryBuilder('shop').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -240,9 +228,7 @@ export class ShopRepository
     return query;
   }
 
-  private createSelectQuery(
-    queryConfig: SelectConfig,
-  ): SelectQueryBuilder<Shop> {
+  private createSelectQuery(queryConfig: Select): SelectQueryBuilder<Shop> {
     let query: SelectQueryBuilder<Shop>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -255,9 +241,11 @@ export class ShopRepository
       query = this.createQueryBuilder('shop').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 

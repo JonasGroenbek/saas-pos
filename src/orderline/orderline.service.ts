@@ -9,8 +9,4 @@ export class OrderlineService {
     @InjectRepository(OrderlineRepository)
     public readonly orderlineRepository: OrderlineRepository,
   ) {}
-
-  getById(id: number, queryRunner?: QueryRunner) {
-    return this.orderlineRepository.getById(id, queryRunner);
-  }
 }

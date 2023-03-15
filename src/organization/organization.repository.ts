@@ -3,7 +3,6 @@ import {
   DeepPartial,
   DeleteQueryBuilder,
   InsertQueryBuilder,
-  QueryRunner,
   Repository,
   SelectQueryBuilder,
   UpdateQueryBuilder,
@@ -13,7 +12,15 @@ import { Organization } from './organization.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import 'dotenv/config';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export enum OrganizationRelation {
   Shop = 'shops',
@@ -33,61 +40,34 @@ export interface WhereConfig {
   id?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<Organization>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<OrganizationRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<Organization>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<Organization>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<Organization, WhereConfig, OrganizationRelation>;
+type Create = CreateConfig<Organization>;
+type Update = UpdateConfig<Organization>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class OrganizationRepository
   extends Repository<Organization>
-  implements BaseRepository<Organization>
+  implements BaseRepository<Organization, WhereConfig, OrganizationRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(Organization, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<Organization> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<Organization> {
+  async getOne(queryConfig: Select): Promise<Organization> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<Organization[]> {
+  async getMany(queryConfig: Select): Promise<Organization[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: Organization[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -98,34 +78,39 @@ export class OrganizationRepository
     };
   }
 
-  private join(
+  join(
     query: SelectQueryBuilder<Organization>,
     join: Join<OrganizationRelation>,
+    identity: Identity | null,
   ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<Organization> {
+  async insertOne(queryConfig: Create): Promise<Organization> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<Organization>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<Organization> {
+  async softDeleteOne(queryConfig: Delete): Promise<Organization> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -136,7 +121,7 @@ export class OrganizationRepository
     return this.create(result.raw[0] as DeepPartial<Organization>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<Organization> {
+  async deleteOne(queryConfig: Delete): Promise<Organization> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -147,7 +132,7 @@ export class OrganizationRepository
     return this.create(result.raw[0] as DeepPartial<Organization>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<Organization> {
+  async updateOne(queryConfig: Update): Promise<Organization> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -160,7 +145,7 @@ export class OrganizationRepository
   }
 
   private createInsertQuery(
-    queryConfig: CreateConfig,
+    queryConfig: Create,
   ): InsertQueryBuilder<Organization> {
     let query: InsertQueryBuilder<Organization>;
     const entity = queryConfig.entity;
@@ -182,7 +167,7 @@ export class OrganizationRepository
   }
 
   private createUpdateQuery(
-    queryConfig: UpdateConfig,
+    queryConfig: Update,
   ): UpdateQueryBuilder<Organization> {
     let query: UpdateQueryBuilder<Organization>;
     const { id, values, queryRunner } = queryConfig;
@@ -196,6 +181,8 @@ export class OrganizationRepository
       query = this.createQueryBuilder('organization').update();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     query.set({ ...values, updatedAt: new Date() });
 
     query.returning('*');
@@ -208,7 +195,7 @@ export class OrganizationRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<Organization> {
     let query: SoftDeleteQueryBuilder<Organization>;
     const queryRunner = queryConfig.queryRunner;
@@ -222,6 +209,8 @@ export class OrganizationRepository
       query = this.createQueryBuilder('organization').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -232,7 +221,7 @@ export class OrganizationRepository
   }
 
   private createDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): DeleteQueryBuilder<Organization> {
     let query: DeleteQueryBuilder<Organization>;
     const queryRunner = queryConfig.queryRunner;
@@ -246,6 +235,8 @@ export class OrganizationRepository
       query = this.createQueryBuilder('organization').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -256,7 +247,7 @@ export class OrganizationRepository
   }
 
   private createSelectQuery(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): SelectQueryBuilder<Organization> {
     let query: SelectQueryBuilder<Organization>;
     const queryRunner = queryConfig.queryRunner;
@@ -270,9 +261,11 @@ export class OrganizationRepository
       query = this.createQueryBuilder('organization').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 

@@ -3,7 +3,6 @@ import {
   DeepPartial,
   DeleteQueryBuilder,
   InsertQueryBuilder,
-  QueryRunner,
   Repository,
   SelectQueryBuilder,
   UpdateQueryBuilder,
@@ -13,7 +12,15 @@ import { Transaction } from './transaction.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import 'dotenv/config';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export enum TransactionRelation {
   Sale = 'sale',
@@ -30,61 +37,34 @@ export interface WhereConfig {
   organizationId?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<Transaction>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<TransactionRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<Transaction>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<Transaction>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<Transaction, WhereConfig, TransactionRelation>;
+type Create = CreateConfig<Transaction>;
+type Update = UpdateConfig<Transaction>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class TransactionRepository
   extends Repository<Transaction>
-  implements BaseRepository<Transaction>
+  implements BaseRepository<Transaction, WhereConfig, TransactionRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(Transaction, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<Transaction> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<Transaction> {
+  async getOne(queryConfig: Select): Promise<Transaction> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<Transaction[]> {
+  async getMany(queryConfig: Select): Promise<Transaction[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: Transaction[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -95,34 +75,39 @@ export class TransactionRepository
     };
   }
 
-  private join(
+  join(
     query: SelectQueryBuilder<Transaction>,
     join: Join<TransactionRelation>,
+    identity: Identity | null,
   ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<Transaction> {
+  async insertOne(queryConfig: Create): Promise<Transaction> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<Transaction>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<Transaction> {
+  async softDeleteOne(queryConfig: Delete): Promise<Transaction> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -133,7 +118,7 @@ export class TransactionRepository
     return this.create(result.raw[0] as DeepPartial<Transaction>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<Transaction> {
+  async deleteOne(queryConfig: Delete): Promise<Transaction> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -144,7 +129,7 @@ export class TransactionRepository
     return this.create(result.raw[0] as DeepPartial<Transaction>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<Transaction> {
+  async updateOne(queryConfig: Update): Promise<Transaction> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -157,7 +142,7 @@ export class TransactionRepository
   }
 
   private createInsertQuery(
-    queryConfig: CreateConfig,
+    queryConfig: Create,
   ): InsertQueryBuilder<Transaction> {
     let query: InsertQueryBuilder<Transaction>;
     const entity = queryConfig.entity;
@@ -179,7 +164,7 @@ export class TransactionRepository
   }
 
   private createUpdateQuery(
-    queryConfig: UpdateConfig,
+    queryConfig: Update,
   ): UpdateQueryBuilder<Transaction> {
     let query: UpdateQueryBuilder<Transaction>;
     const { id, values, queryRunner } = queryConfig;
@@ -193,6 +178,8 @@ export class TransactionRepository
       query = this.createQueryBuilder('transaction').update();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     query.set({ ...values, updatedAt: new Date() });
 
     query.returning('*');
@@ -205,7 +192,7 @@ export class TransactionRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<Transaction> {
     let query: SoftDeleteQueryBuilder<Transaction>;
     const queryRunner = queryConfig.queryRunner;
@@ -219,6 +206,8 @@ export class TransactionRepository
       query = this.createQueryBuilder('transaction').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -229,7 +218,7 @@ export class TransactionRepository
   }
 
   private createDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): DeleteQueryBuilder<Transaction> {
     let query: DeleteQueryBuilder<Transaction>;
     const queryRunner = queryConfig.queryRunner;
@@ -243,6 +232,8 @@ export class TransactionRepository
       query = this.createQueryBuilder('transaction').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -253,7 +244,7 @@ export class TransactionRepository
   }
 
   private createSelectQuery(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): SelectQueryBuilder<Transaction> {
     let query: SelectQueryBuilder<Transaction>;
     const queryRunner = queryConfig.queryRunner;
@@ -267,9 +258,11 @@ export class TransactionRepository
       query = this.createQueryBuilder('transaction').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 

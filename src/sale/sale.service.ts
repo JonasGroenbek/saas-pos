@@ -9,8 +9,4 @@ export class SaleService {
     @InjectRepository(SaleRepository)
     public readonly saleRepository: SaleRepository,
   ) {}
-
-  getById(id: number, queryRunner?: QueryRunner) {
-    return this.saleRepository.getById(id, queryRunner);
-  }
 }

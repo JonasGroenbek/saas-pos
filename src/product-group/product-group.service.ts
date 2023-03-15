@@ -9,8 +9,4 @@ export class ProductGroupService {
     @InjectRepository(ProductGroupRepository)
     public readonly productGroupRepository: ProductGroupRepository,
   ) {}
-
-  getById(id: number, queryRunner?: QueryRunner) {
-    return this.productGroupRepository.getById(id, queryRunner);
-  }
 }

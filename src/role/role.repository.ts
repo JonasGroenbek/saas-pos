@@ -12,8 +12,16 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Role } from './role.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
 import 'dotenv/config';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export enum RoleRelation {
   User = 'user',
@@ -30,61 +38,34 @@ export interface WhereConfig {
   organizationId?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<Role>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<RoleRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<Role>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<Role>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<Role, WhereConfig, RoleRelation>;
+type Create = CreateConfig<Role>;
+type Update = UpdateConfig<Role>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class RoleRepository
   extends Repository<Role>
-  implements BaseRepository<Role>
+  implements BaseRepository<Role, WhereConfig, RoleRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(Role, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<Role> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<Role> {
+  async getOne(queryConfig: Select): Promise<Role> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<Role[]> {
+  async getMany(queryConfig: Select): Promise<Role[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: Role[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -95,31 +76,39 @@ export class RoleRepository
     };
   }
 
-  private join(query: SelectQueryBuilder<Role>, join: Join<RoleRelation>) {
+  join(
+    query: SelectQueryBuilder<Role>,
+    join: Join<RoleRelation>,
+    identity: Identity | null,
+  ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<Role> {
+  async insertOne(queryConfig: Create): Promise<Role> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<Role>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<Role> {
+  async softDeleteOne(queryConfig: Delete): Promise<Role> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete role', HttpStatus.CONFLICT);
@@ -127,7 +116,7 @@ export class RoleRepository
     return this.create(result.raw[0] as DeepPartial<Role>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<Role> {
+  async deleteOne(queryConfig: Delete): Promise<Role> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete role', HttpStatus.CONFLICT);
@@ -135,7 +124,7 @@ export class RoleRepository
     return this.create(result.raw[0] as DeepPartial<Role>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<Role> {
+  async updateOne(queryConfig: Update): Promise<Role> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -144,9 +133,7 @@ export class RoleRepository
     return this.create(result.raw[0] as DeepPartial<Role>);
   }
 
-  private createInsertQuery(
-    queryConfig: CreateConfig,
-  ): InsertQueryBuilder<Role> {
+  private createInsertQuery(queryConfig: Create): InsertQueryBuilder<Role> {
     let query: InsertQueryBuilder<Role>;
     const entity = queryConfig.entity;
     const queryRunner = queryConfig.queryRunner;
@@ -166,9 +153,7 @@ export class RoleRepository
     return query;
   }
 
-  private createUpdateQuery(
-    queryConfig: UpdateConfig,
-  ): UpdateQueryBuilder<Role> {
+  private createUpdateQuery(queryConfig: Update): UpdateQueryBuilder<Role> {
     let query: UpdateQueryBuilder<Role>;
     const { id, values, queryRunner } = queryConfig;
 
@@ -180,6 +165,8 @@ export class RoleRepository
     } else {
       query = this.createQueryBuilder('role').update();
     }
+
+    identityFilter(query, queryConfig.identity);
 
     query.set({ ...values, updatedAt: new Date() });
 
@@ -193,7 +180,7 @@ export class RoleRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<Role> {
     let query: SoftDeleteQueryBuilder<Role>;
     const queryRunner = queryConfig.queryRunner;
@@ -207,6 +194,8 @@ export class RoleRepository
       query = this.createQueryBuilder('role').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -216,9 +205,7 @@ export class RoleRepository
     return query;
   }
 
-  private createDeleteQuery(
-    queryConfig: DeleteConfig,
-  ): DeleteQueryBuilder<Role> {
+  private createDeleteQuery(queryConfig: Delete): DeleteQueryBuilder<Role> {
     let query: DeleteQueryBuilder<Role>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -231,6 +218,8 @@ export class RoleRepository
       query = this.createQueryBuilder('role').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -240,9 +229,7 @@ export class RoleRepository
     return query;
   }
 
-  private createSelectQuery(
-    queryConfig: SelectConfig,
-  ): SelectQueryBuilder<Role> {
+  private createSelectQuery(queryConfig: Select): SelectQueryBuilder<Role> {
     let query: SelectQueryBuilder<Role>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -255,9 +242,11 @@ export class RoleRepository
       query = this.createQueryBuilder('role').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 

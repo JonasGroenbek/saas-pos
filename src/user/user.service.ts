@@ -5,9 +5,7 @@ import { UserRepository } from './user.repository';
 import * as argon2 from 'argon2';
 import { User } from './user.entity';
 import { QueryRunner } from 'typeorm';
-import { Identity } from 'src/auth/interfaces/identity-token-payload';
-import { RoleRelation } from 'src/role/role.repository';
-import { JoinType } from 'src/postgres/interfaces';
+import { Identity } from '../auth/interfaces/identity-token-payload';
 
 @Injectable()
 export class UserService {
@@ -46,15 +44,18 @@ export class UserService {
     await this.validateUserDoesNotExist(userDto.email, identity);
     this.validateRegisterUserDtoMatchesIdentity(userDto, identity);
 
+    const entity = {
+      email: userDto.email,
+      roleId: userDto.roleId,
+      password: await argon2.hash(userDto.password),
+      organizationId: identity?.organizationId || userDto.organizationId,
+      firstName: userDto.firstName,
+      lastName: userDto.lastName,
+    };
+
     const user = await this.userRepository.insertOne({
-      entity: {
-        email: userDto.email,
-        roleId: userDto.roleId,
-        password: await argon2.hash(userDto.password),
-        organizationId: identity.organizationId || userDto.organizationId,
-        firstName: userDto.firstName,
-        lastName: userDto.lastName,
-      },
+      entity,
+      identity,
       queryRunner,
     });
 

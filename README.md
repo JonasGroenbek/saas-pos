@@ -1,5 +1,19 @@
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/JonasGroenbek/shops-service/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/JonasGroenbek/shops-service/tree/main)
 
+To do
+
+- [x] Add some important domain specific modules
+- [x] Integration testing with docker and postgres
+- [x] CI
+- [x] Reusable repository strategy
+- [x] Authorization with identity
+- [x] Authentication (Jwt)
+- [ ] Shop identity and integrate repositories
+- [ ] IaC with AWS
+- [ ] Create CRUD endpoints for modules with entities
+- [ ] Document each module with MD
+- [ ] Implement soft delete functionality and test
+
 # saas-pos
 
 ## The application
@@ -45,6 +59,14 @@ Unfortunately the tests are not availalbe to run on the docker-compose database.
 `http://localhost:{port}/docs`
 
 ## Testing
+
+Integration testing migrations
+
+## Cloud
+
+#### IaC
+
+Pulumi
 
 ## Code Conventions
 

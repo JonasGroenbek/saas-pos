@@ -20,9 +20,13 @@ import {
   UpdateConfig,
   DeleteConfig,
   identityFilter,
+  validateIdentityInsert,
 } from '../postgres/base-repository';
 import 'dotenv/config';
-import { Identity } from 'src/auth/interfaces/identity-token-payload';
+import { Identity } from '../auth/interfaces/identity-token-payload';
+import { RelationCountLoader } from 'typeorm/query-builder/relation-count/RelationCountLoader';
+import { RelationIdLoader } from 'typeorm/query-builder/relation-id/RelationIdLoader';
+import { RawSqlResultsToEntityTransformer } from 'typeorm/query-builder/transformer/RawSqlResultsToEntityTransformer';
 
 export const EXCLUDED_COLUMNS = ['password'];
 
@@ -55,27 +59,17 @@ type Delete = DeleteConfig;
 @Injectable()
 export class UserRepository
   extends Repository<User>
-  implements BaseRepository<User>
+  implements BaseRepository<User, WhereConfig, UserRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(User, dataSource.createEntityManager());
   }
 
-  private join(
+  join(
     query: SelectQueryBuilder<User>,
     join: Join<UserRelation>,
     identity: Identity | null,
   ) {
-    const RELATION_CONFIG: {
-      [key in UserRelation]: { path: string; alias: string };
-    } = {
-      role: { path: 'user.role', alias: 'role' },
-      organization: {
-        path: 'user.organization',
-        alias: 'organization',
-      },
-    } as const;
-
     if (join.type === JoinType.Inner) {
       query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
@@ -104,15 +98,21 @@ export class UserRepository
   ) {
     const EXCLUDED_COLUMNS = excludedColumns ?? ['password'];
 
-    return this.dataSource.manager.connection
+    const selectColumns = this.dataSource.manager.connection
       .getMetadata(User)
       .columns.filter(
         (column) => !EXCLUDED_COLUMNS.includes(column.propertyName),
       )
-      .map(
-        (column) =>
-          `${query.alias ? `${query.alias}.` : ''}${column.propertyName}`,
-      );
+      .map((column) => {
+        if (query['@instanceof'].description === 'SelectQueryBuilder') {
+          return `${query.alias ? `${query.alias}.` : ''}${
+            column.propertyName
+          }`;
+        }
+        return column.propertyName;
+      });
+
+    return selectColumns;
   }
 
   async getById(
@@ -171,6 +171,7 @@ export class UserRepository
   }
 
   async insertOne(queryConfig: Create): Promise<User> {
+    validateIdentityInsert(queryConfig);
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<User>);
   }
@@ -192,12 +193,49 @@ export class UserRepository
   }
 
   async updateOne(queryConfig: Update): Promise<User> {
-    const result = await this.createUpdateQuery(queryConfig).execute();
+    const query = this.createUpdateQuery(queryConfig);
+    const result = await query.execute();
 
     if (!result.affected) {
       throw new HttpException('Could not update user', HttpStatus.CONFLICT);
     }
-    return this.create(result.raw[0] as DeepPartial<User>);
+
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    const relationIdLoader = new RelationIdLoader(
+      this.dataSource.manager.connection,
+      queryRunner,
+      query.expressionMap.relationIdAttributes,
+    );
+    const rawResults = await this.dataSource.query(
+      `select * from "user" limit 1;`,
+    );
+    const relationCountLoader = new RelationCountLoader(
+      this.dataSource.manager.connection,
+      queryRunner,
+      query.expressionMap.relationCountAttributes,
+    );
+    //console.log('relationCountLoader', relationCountLoader);
+    console.log('result.raw', rawResults);
+
+    const rawRelationIdResults = await relationIdLoader.load(rawResults);
+    console.log('rawRelationIdResults', rawRelationIdResults);
+    const rawRelationCountResults = await relationCountLoader.load(rawResults);
+    console.log('rawRelationCountResults', rawRelationCountResults);
+    const transformer = new RawSqlResultsToEntityTransformer(
+      query.expressionMap,
+      this.dataSource.driver,
+      rawRelationIdResults,
+      rawRelationCountResults,
+    );
+
+    console.log('result', rawResults);
+    const entities = transformer.transform(
+      rawResults,
+      query.expressionMap.mainAlias,
+    );
+    console.log('mergeIntoEntity', entities);
+    return entities[0] as User;
   }
 
   private createInsertQuery(queryConfig: Create): InsertQueryBuilder<User> {
@@ -214,8 +252,8 @@ export class UserRepository
       query = this.createQueryBuilder('user').insert();
     }
 
-    query.returning('*');
     query.values({ ...entity, createdAt: new Date(), updatedAt: new Date() });
+    query.returning('*');
 
     return query;
   }
@@ -227,10 +265,10 @@ export class UserRepository
     if (queryRunner) {
       query = queryRunner.manager
         .getRepository(User)
-        .createQueryBuilder('user')
+        .createQueryBuilder()
         .update();
     } else {
-      query = this.createQueryBuilder('user').update();
+      query = this.createQueryBuilder().update();
     }
 
     query.set({ ...values, updatedAt: new Date() });

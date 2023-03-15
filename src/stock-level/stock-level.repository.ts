@@ -3,7 +3,6 @@ import {
   DeepPartial,
   DeleteQueryBuilder,
   InsertQueryBuilder,
-  QueryRunner,
   Repository,
   SelectQueryBuilder,
   UpdateQueryBuilder,
@@ -13,7 +12,15 @@ import { StockLevel } from './stock-level.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import 'dotenv/config';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
 export enum StockLevelRelation {
   Product = 'product',
@@ -30,61 +37,34 @@ export interface WhereConfig {
   organizationId?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<StockLevel>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<StockLevelRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<StockLevel>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<StockLevel>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<StockLevel, WhereConfig, StockLevelRelation>;
+type Create = CreateConfig<StockLevel>;
+type Update = UpdateConfig<StockLevel>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class StockLevelRepository
   extends Repository<StockLevel>
-  implements BaseRepository<StockLevel>
+  implements BaseRepository<StockLevel, WhereConfig, StockLevelRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(StockLevel, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<StockLevel> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<StockLevel> {
+  async getOne(queryConfig: Select): Promise<StockLevel> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<StockLevel[]> {
+  async getMany(queryConfig: Select): Promise<StockLevel[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: StockLevel[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -95,34 +75,39 @@ export class StockLevelRepository
     };
   }
 
-  private join(
+  join(
     query: SelectQueryBuilder<StockLevel>,
     join: Join<StockLevelRelation>,
+    identity: Identity | null,
   ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<StockLevel> {
+  async insertOne(queryConfig: Create): Promise<StockLevel> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<StockLevel>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<StockLevel> {
+  async softDeleteOne(queryConfig: Delete): Promise<StockLevel> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -133,7 +118,7 @@ export class StockLevelRepository
     return this.create(result.raw[0] as DeepPartial<StockLevel>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<StockLevel> {
+  async deleteOne(queryConfig: Delete): Promise<StockLevel> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException(
@@ -144,7 +129,7 @@ export class StockLevelRepository
     return this.create(result.raw[0] as DeepPartial<StockLevel>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<StockLevel> {
+  async updateOne(queryConfig: Update): Promise<StockLevel> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -157,7 +142,7 @@ export class StockLevelRepository
   }
 
   private createInsertQuery(
-    queryConfig: CreateConfig,
+    queryConfig: Create,
   ): InsertQueryBuilder<StockLevel> {
     let query: InsertQueryBuilder<StockLevel>;
     const entity = queryConfig.entity;
@@ -179,7 +164,7 @@ export class StockLevelRepository
   }
 
   private createUpdateQuery(
-    queryConfig: UpdateConfig,
+    queryConfig: Update,
   ): UpdateQueryBuilder<StockLevel> {
     let query: UpdateQueryBuilder<StockLevel>;
     const { id, values, queryRunner } = queryConfig;
@@ -193,6 +178,8 @@ export class StockLevelRepository
       query = this.createQueryBuilder('stockLevel').update();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     query.set({ ...values, updatedAt: new Date() });
 
     query.returning('*');
@@ -205,7 +192,7 @@ export class StockLevelRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<StockLevel> {
     let query: SoftDeleteQueryBuilder<StockLevel>;
     const queryRunner = queryConfig.queryRunner;
@@ -219,6 +206,8 @@ export class StockLevelRepository
       query = this.createQueryBuilder('stockLevel').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -229,7 +218,7 @@ export class StockLevelRepository
   }
 
   private createDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): DeleteQueryBuilder<StockLevel> {
     let query: DeleteQueryBuilder<StockLevel>;
     const queryRunner = queryConfig.queryRunner;
@@ -243,6 +232,8 @@ export class StockLevelRepository
       query = this.createQueryBuilder('stockLevel').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -253,7 +244,7 @@ export class StockLevelRepository
   }
 
   private createSelectQuery(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): SelectQueryBuilder<StockLevel> {
     let query: SelectQueryBuilder<StockLevel>;
     const queryRunner = queryConfig.queryRunner;
@@ -267,9 +258,11 @@ export class StockLevelRepository
       query = this.createQueryBuilder('stockLevel').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 

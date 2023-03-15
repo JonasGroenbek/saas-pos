@@ -5,6 +5,7 @@ import {
   clearTestData,
   restartSequences,
   seedTestData,
+  TEST_IDENTITIES,
 } from '../postgres/seeds/test-data.seed';
 import { UserModule } from '../user/user.module';
 import { Organization } from '../organization/organization.entity';
@@ -13,7 +14,7 @@ import { UserService } from './user.service';
 import { UserRepository } from './user.repository';
 import { RegisterUserDto } from './dto/register-user.dto';
 import { Role } from '../role/role.entity';
-import { QueryRunner } from 'typeorm';
+import { AuthModule } from '../auth/auth.module';
 
 describe('organization.service.ts', () => {
   let userService: UserService;
@@ -24,7 +25,11 @@ describe('organization.service.ts', () => {
 
   beforeAll(async () => {
     app = await Test.createTestingModule({
-      imports: [TypeOrmModule.forRoot(testTypeormConfig), UserModule],
+      imports: [
+        TypeOrmModule.forRoot(testTypeormConfig),
+        UserModule,
+        AuthModule,
+      ],
       providers: [UserService, UserRepository],
     }).compile();
 
@@ -62,7 +67,10 @@ describe('organization.service.ts', () => {
         organizationId: organizations[0].id,
         roleId: roles[0].id,
       };
-      const user = await userService.registerUser(dto);
+      const user = await userService.registerUser({
+        userDto: dto,
+        identity: TEST_IDENTITIES.org1user1,
+      });
       expect(user).toBeDefined();
     });
   });

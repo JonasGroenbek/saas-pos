@@ -13,14 +13,22 @@ import { Sale } from './sale.entity';
 import { SoftDeleteQueryBuilder } from 'typeorm/query-builder/SoftDeleteQueryBuilder';
 import 'dotenv/config';
 import { Join, JoinType } from '../postgres/interfaces';
-import { BaseRepository } from '../postgres/base-repository';
+import {
+  BaseRepository,
+  CreateConfig,
+  DeleteConfig,
+  identityFilter,
+  SelectConfig,
+  UpdateConfig,
+} from '../postgres/base-repository';
+import { Identity } from 'src/auth/interfaces/identity-token-payload';
 
-export enum RoleRelation {
+export enum SaleRelation {
   User = 'user',
 }
 
 const RELATION_CONFIG: {
-  [key in RoleRelation]: { path: string; alias: string };
+  [key in SaleRelation]: { path: string; alias: string };
 } = {
   user: { path: 'sale.user', alias: 'user' },
 } as const;
@@ -30,61 +38,34 @@ export interface WhereConfig {
   organizationId?: number;
 }
 
-export interface SelectConfig {
-  extensions?: Array<(qb: SelectQueryBuilder<Sale>) => void>;
-  where?: WhereConfig;
-  joins?: Array<Join<RoleRelation>>;
-  limit?: number;
-  offset?: number;
-  queryRunner?: QueryRunner;
-}
-
-export interface CreateConfig {
-  entity: Omit<Partial<Sale>, 'createdAt' | 'updatedAt'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface UpdateConfig {
-  id: number;
-  values: Omit<Partial<Sale>, 'id'>;
-  queryRunner?: QueryRunner;
-}
-
-export interface DeleteConfig {
-  id: number;
-  queryRunner?: QueryRunner;
-}
+type Select = SelectConfig<Sale, WhereConfig, SaleRelation>;
+type Create = CreateConfig<Sale>;
+type Update = UpdateConfig<Sale>;
+type Delete = DeleteConfig;
 
 @Injectable()
 export class SaleRepository
   extends Repository<Sale>
-  implements BaseRepository<Sale>
+  implements BaseRepository<Sale, WhereConfig, SaleRelation>
 {
   constructor(private readonly dataSource: DataSource) {
     super(Sale, dataSource.createEntityManager());
   }
 
-  async getById(id: number, queryRunner?: QueryRunner): Promise<Sale> {
-    return await this.createSelectQuery({
-      where: { id },
-      queryRunner,
-    }).getOne();
-  }
-
-  async getCount(queryConfig: SelectConfig): Promise<number> {
+  async getCount(queryConfig: Select): Promise<number> {
     return this.createSelectQuery(queryConfig).getCount();
   }
 
-  async getOne(queryConfig: SelectConfig): Promise<Sale> {
+  async getOne(queryConfig: Select): Promise<Sale> {
     return this.createSelectQuery(queryConfig).getOne();
   }
 
-  async getMany(queryConfig: SelectConfig): Promise<Sale[]> {
+  async getMany(queryConfig: Select): Promise<Sale[]> {
     return this.createSelectQuery(queryConfig).getMany();
   }
 
   async getManyWithCount(
-    queryConfig: SelectConfig,
+    queryConfig: Select,
   ): Promise<{ entities: Sale[]; count: number }> {
     const [entities, count] = await this.createSelectQuery(
       queryConfig,
@@ -95,31 +76,39 @@ export class SaleRepository
     };
   }
 
-  private join(query: SelectQueryBuilder<Sale>, join: Join<RoleRelation>) {
+  join(
+    query: SelectQueryBuilder<Sale>,
+    join: Join<SaleRelation>,
+    identity: Identity | null,
+  ) {
     if (join.type === JoinType.Inner) {
-      return query.innerJoinAndSelect(
+      query.innerJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     } else if (join.type === JoinType.Left) {
-      return query.leftJoinAndSelect(
+      query.leftJoinAndSelect(
         RELATION_CONFIG[join.relation].path,
         RELATION_CONFIG[join.relation].alias,
       );
     }
 
-    return query.leftJoinAndSelect(
-      RELATION_CONFIG[join.relation].path,
-      RELATION_CONFIG[join.relation].alias,
+    query.andWhere(
+      `${
+        RELATION_CONFIG[join.relation].alias
+      }.organizationId = :organizationId`,
+      { organizationId: identity.organizationId },
     );
+
+    return query;
   }
 
-  async insertOne(queryConfig: CreateConfig): Promise<Sale> {
+  async insertOne(queryConfig: Create): Promise<Sale> {
     const result = await this.createInsertQuery(queryConfig).execute();
     return this.create(result.raw[0] as DeepPartial<Sale>);
   }
 
-  async softDeleteOne(queryConfig: DeleteConfig): Promise<Sale> {
+  async softDeleteOne(queryConfig: Delete): Promise<Sale> {
     const result = await this.createSoftDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete sale', HttpStatus.CONFLICT);
@@ -127,7 +116,7 @@ export class SaleRepository
     return this.create(result.raw[0] as DeepPartial<Sale>);
   }
 
-  async deleteOne(queryConfig: DeleteConfig): Promise<Sale> {
+  async deleteOne(queryConfig: Delete): Promise<Sale> {
     const result = await this.createDeleteQuery(queryConfig).execute();
     if (!result.affected) {
       throw new HttpException('Could not delete sale', HttpStatus.CONFLICT);
@@ -135,7 +124,7 @@ export class SaleRepository
     return this.create(result.raw[0] as DeepPartial<Sale>);
   }
 
-  async updateOne(queryConfig: UpdateConfig): Promise<Sale> {
+  async updateOne(queryConfig: Update): Promise<Sale> {
     const result = await this.createUpdateQuery(queryConfig).execute();
 
     if (!result.affected) {
@@ -144,9 +133,7 @@ export class SaleRepository
     return this.create(result.raw[0] as DeepPartial<Sale>);
   }
 
-  private createInsertQuery(
-    queryConfig: CreateConfig,
-  ): InsertQueryBuilder<Sale> {
+  private createInsertQuery(queryConfig: Create): InsertQueryBuilder<Sale> {
     let query: InsertQueryBuilder<Sale>;
     const entity = queryConfig.entity;
     const queryRunner = queryConfig.queryRunner;
@@ -166,9 +153,7 @@ export class SaleRepository
     return query;
   }
 
-  private createUpdateQuery(
-    queryConfig: UpdateConfig,
-  ): UpdateQueryBuilder<Sale> {
+  private createUpdateQuery(queryConfig: Update): UpdateQueryBuilder<Sale> {
     let query: UpdateQueryBuilder<Sale>;
     const { id, values, queryRunner } = queryConfig;
 
@@ -180,6 +165,8 @@ export class SaleRepository
     } else {
       query = this.createQueryBuilder('sale').update();
     }
+
+    identityFilter(query, queryConfig.identity);
 
     query.set({ ...values, updatedAt: new Date() });
 
@@ -193,7 +180,7 @@ export class SaleRepository
   }
 
   private createSoftDeleteQuery(
-    queryConfig: DeleteConfig,
+    queryConfig: Delete,
   ): SoftDeleteQueryBuilder<Sale> {
     let query: SoftDeleteQueryBuilder<Sale>;
     const queryRunner = queryConfig.queryRunner;
@@ -207,6 +194,8 @@ export class SaleRepository
       query = this.createQueryBuilder('sale').softDelete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -216,9 +205,7 @@ export class SaleRepository
     return query;
   }
 
-  private createDeleteQuery(
-    queryConfig: DeleteConfig,
-  ): DeleteQueryBuilder<Sale> {
+  private createDeleteQuery(queryConfig: Delete): DeleteQueryBuilder<Sale> {
     let query: DeleteQueryBuilder<Sale>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -231,6 +218,8 @@ export class SaleRepository
       query = this.createQueryBuilder('sale').delete();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.id) {
       query.andWhere(`id = :id`, { id: queryConfig.id });
     }
@@ -240,9 +229,7 @@ export class SaleRepository
     return query;
   }
 
-  private createSelectQuery(
-    queryConfig: SelectConfig,
-  ): SelectQueryBuilder<Sale> {
+  private createSelectQuery(queryConfig: Select): SelectQueryBuilder<Sale> {
     let query: SelectQueryBuilder<Sale>;
     const queryRunner = queryConfig.queryRunner;
 
@@ -255,9 +242,11 @@ export class SaleRepository
       query = this.createQueryBuilder('sale').select();
     }
 
+    identityFilter(query, queryConfig.identity);
+
     if (queryConfig.joins) {
       for (const join of queryConfig.joins) {
-        this.join(query, join);
+        this.join(query, join, queryConfig.identity);
       }
     }
 
