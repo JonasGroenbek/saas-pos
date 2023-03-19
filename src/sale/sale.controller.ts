@@ -5,12 +5,12 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
-import { Identity } from 'src/auth/interfaces/identity-token-payload';
-import { JwtGuard } from 'src/guards/jwt.guard';
-import { RequestIdentity } from 'src/decorators/request-identity.decorator';
-import { RequestPolicy } from 'src/decorators/request-policy.decorator';
-import { Policy } from 'src/enums/policy.enum';
-import { PolicyGuard } from 'src/guards/policy.guard';
+import { Identity } from '../auth/interfaces/identity-token-payload';
+import { JwtGuard } from '../guards/jwt.guard';
+import { RequestIdentity } from '../decorators/request-identity.decorator';
+import { RequestPolicy } from '../decorators/request-policy.decorator';
+import { Policy } from '../enums/policy.enum';
+import { PolicyGuard } from '../guards/policy.guard';
 import { SaleService } from './sale.service';
 
 @Controller()

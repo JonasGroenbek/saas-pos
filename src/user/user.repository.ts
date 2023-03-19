@@ -27,6 +27,7 @@ import { Identity } from '../auth/interfaces/identity-token-payload';
 import { RelationCountLoader } from 'typeorm/query-builder/relation-count/RelationCountLoader';
 import { RelationIdLoader } from 'typeorm/query-builder/relation-id/RelationIdLoader';
 import { RawSqlResultsToEntityTransformer } from 'typeorm/query-builder/transformer/RawSqlResultsToEntityTransformer';
+import { PlainObjectToNewEntityTransformer } from 'typeorm/query-builder/transformer/PlainObjectToNewEntityTransformer';
 
 export const EXCLUDED_COLUMNS = ['password'];
 
@@ -194,12 +195,13 @@ export class UserRepository
 
   async updateOne(queryConfig: Update): Promise<User> {
     const query = this.createUpdateQuery(queryConfig);
-    const result = await query.execute();
+    const { raw, affected } = await query.execute();
 
-    if (!result.affected) {
+    if (!affected) {
       throw new HttpException('Could not update user', HttpStatus.CONFLICT);
     }
 
+    /*
     const queryRunner = this.dataSource.createQueryRunner();
 
     const relationIdLoader = new RelationIdLoader(
@@ -207,21 +209,17 @@ export class UserRepository
       queryRunner,
       query.expressionMap.relationIdAttributes,
     );
-    const rawResults = await this.dataSource.query(
-      `select * from "user" limit 1;`,
-    );
+
     const relationCountLoader = new RelationCountLoader(
       this.dataSource.manager.connection,
       queryRunner,
       query.expressionMap.relationCountAttributes,
     );
-    //console.log('relationCountLoader', relationCountLoader);
-    console.log('result.raw', rawResults);
 
-    const rawRelationIdResults = await relationIdLoader.load(rawResults);
-    console.log('rawRelationIdResults', rawRelationIdResults);
-    const rawRelationCountResults = await relationCountLoader.load(rawResults);
-    console.log('rawRelationCountResults', rawRelationCountResults);
+    const rawRelationIdResults = await relationIdLoader.load(raw);
+
+    const rawRelationCountResults = await relationCountLoader.load(raw);
+
     const transformer = new RawSqlResultsToEntityTransformer(
       query.expressionMap,
       this.dataSource.driver,
@@ -229,13 +227,26 @@ export class UserRepository
       rawRelationCountResults,
     );
 
-    console.log('result', rawResults);
-    const entities = transformer.transform(
-      rawResults,
-      query.expressionMap.mainAlias,
+    console.log('raw', raw);
+
+    const entities = transformer.transform(raw, query.expressionMap.mainAlias);
+
+    console.log('entities', entities);
+
+    */
+
+    const transformer = new PlainObjectToNewEntityTransformer();
+
+    const updatedUser: User = this.metadata.create(
+      this.dataSource.createQueryRunner(),
     );
-    console.log('mergeIntoEntity', entities);
-    return entities[0] as User;
+
+    console.log(raw);
+    transformer.transform(updatedUser, raw[0], this.metadata);
+
+    console.log('raw', raw);
+    console.log('updatedUser', updatedUser);
+    return updatedUser;
   }
 
   private createInsertQuery(queryConfig: Create): InsertQueryBuilder<User> {

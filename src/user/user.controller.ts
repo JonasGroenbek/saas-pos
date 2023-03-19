@@ -10,8 +10,8 @@ import { JwtGuard } from '../guards/jwt.guard';
 import { PolicyGuard } from '../guards/policy.guard';
 import { UserService } from './user.service';
 import { Policy } from '../enums/policy.enum';
-import { RequestIdentity } from 'src/decorators/request-identity.decorator';
-import { Identity } from 'src/auth/interfaces/identity-token-payload';
+import { RequestIdentity } from '../decorators/request-identity.decorator';
+import { Identity } from '../auth/interfaces/identity-token-payload';
 
 @Controller('users')
 export class UserController {

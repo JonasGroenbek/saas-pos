@@ -20,7 +20,7 @@ import {
   UpdateConfig,
 } from '../postgres/base-repository';
 import 'dotenv/config';
-import { Identity } from 'src/auth/interfaces/identity-token-payload';
+import { Identity } from '../auth/interfaces/identity-token-payload';
 
 export enum ShopRelation {
   Organization = 'organization',

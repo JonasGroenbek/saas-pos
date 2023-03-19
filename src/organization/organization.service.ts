@@ -30,6 +30,7 @@ export class OrganizationService {
       async (queryRunner: QueryRunner) => {
         const organization = await this.organizationRepository.insertOne({
           entity: { name: dto.organizationName },
+          identity: null,
           queryRunner,
         });
 
@@ -39,6 +40,7 @@ export class OrganizationService {
             organizationId: organization.id,
             policies: [Policy.Admin],
           },
+          identity: null,
           queryRunner,
         });
 

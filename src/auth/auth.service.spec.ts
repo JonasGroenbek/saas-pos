@@ -4,7 +4,7 @@ import testTypeormConfig from '../postgres/typeorm-test.config';
 import { AuthService } from './auth.service';
 import { UserModule } from '../user/user.module';
 import { JwtGuard } from '../guards/jwt.guard';
-import { CommonModule } from 'src/common/common.module';
+import { CommonModule } from '../common/common.module';
 
 describe('auth.service.ts', () => {
   let authService: AuthService;

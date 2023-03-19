@@ -4,7 +4,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { AuthenticatedRequest } from 'src/interfaces/authenticated-request.interface';
+import { AuthenticatedRequest } from '../interfaces/authenticated-request.interface';
 
 export const RequestIdentity = createParamDecorator(
   (data: string, ctx: ExecutionContext) => {

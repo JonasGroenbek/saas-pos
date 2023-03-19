@@ -21,7 +21,7 @@ import {
   SelectConfig,
   UpdateConfig,
 } from '../postgres/base-repository';
-import { Identity } from 'src/auth/interfaces/identity-token-payload';
+import { Identity } from '../auth/interfaces/identity-token-payload';
 
 export enum SaleRelation {
   User = 'user',
